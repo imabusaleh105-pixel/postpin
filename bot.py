@@ -28,7 +28,6 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# OWNER
 OWNER_ID = 8762217575
 OWNER_USERNAME = "wabillah"
 
@@ -40,19 +39,20 @@ DB_FILE = "pincycle.db"
 # =========================================================
 
 db = sqlite3.connect(DB_FILE, check_same_thread=False)
+db.execute("PRAGMA journal_mode=WAL")
 
 db.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
-    active INTEGER DEFAULT 1
+    active INTEGER NOT NULL DEFAULT 1
 )
 """)
 
 db.execute("""
 CREATE TABLE IF NOT EXISTS groups (
     chat_id INTEGER PRIMARY KEY,
-    title TEXT,
-    owner_id INTEGER
+    title TEXT NOT NULL,
+    owner_id INTEGER NOT NULL
 )
 """)
 
@@ -60,12 +60,10 @@ db.commit()
 
 
 # =========================================================
-# ACCESS SYSTEM
+# ACCESS
 # =========================================================
 
 def has_access(user_id: int) -> bool:
-
-    # Owner always has access
     if user_id == OWNER_ID:
         return True
 
@@ -74,29 +72,27 @@ def has_access(user_id: int) -> bool:
         (user_id,)
     ).fetchone()
 
-    return bool(row and row[0] == 1)
+    return row is not None and row[0] == 1
 
 
 def grant_access(user_id: int):
-
     db.execute(
         """
-        INSERT OR REPLACE INTO users(user_id, active)
+        INSERT INTO users(user_id, active)
         VALUES (?, 1)
+        ON CONFLICT(user_id)
+        DO UPDATE SET active = 1
         """,
         (user_id,)
     )
-
     db.commit()
 
 
 def remove_access(user_id: int):
-
     db.execute(
         "UPDATE users SET active = 0 WHERE user_id = ?",
         (user_id,)
     )
-
     db.commit()
 
 
@@ -105,20 +101,20 @@ def remove_access(user_id: int):
 # =========================================================
 
 def save_group(chat_id: int, title: str, owner_id: int):
-
     db.execute(
         """
-        INSERT OR REPLACE INTO groups(chat_id, title, owner_id)
+        INSERT INTO groups(chat_id, title, owner_id)
         VALUES (?, ?, ?)
+        ON CONFLICT(chat_id)
+        DO UPDATE SET title = excluded.title,
+                      owner_id = excluded.owner_id
         """,
         (chat_id, title, owner_id)
     )
-
     db.commit()
 
 
 def get_group_owner(chat_id: int):
-
     row = db.execute(
         "SELECT owner_id FROM groups WHERE chat_id = ?",
         (chat_id,)
@@ -151,7 +147,7 @@ def main_menu():
                 "👤 Contact Owner",
                 url=f"https://t.me/{OWNER_USERNAME}"
             )
-        ]
+        ],
     ]
 
     return InlineKeyboardMarkup(keyboard)
@@ -168,9 +164,8 @@ async def start(
 
     user = update.effective_user
 
-    # =====================================================
-    # NO ACCESS
-    # =====================================================
+    if not user:
+        return
 
     if not has_access(user.id):
 
@@ -191,19 +186,15 @@ async def start(
 
         return
 
-    # =====================================================
-    # ACCESS GRANTED
-    # =====================================================
-
     await update.message.reply_text(
-        "✅ Pin Cycle\n\n"
+        "⚡ Pin Cycle\n\n"
         "Select an option below:",
         reply_markup=main_menu()
     )
 
 
 # =========================================================
-# INLINE BUTTON HANDLER
+# BUTTON HANDLER
 # =========================================================
 
 async def button_handler(
@@ -213,36 +204,35 @@ async def button_handler(
 
     query = update.callback_query
 
+    if not query:
+        return
+
     await query.answer()
 
     user_id = query.from_user.id
-
-    # =====================================================
-    # CHECK ACCESS
-    # =====================================================
 
     if not has_access(user_id):
 
         await query.edit_message_text(
             "❌ You don't have access to use Pin Cycle.\n\n"
-            "Please contact the owner to request access."
+            "Please contact the owner."
         )
 
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # ADD GROUP
-    # =====================================================
+    # -----------------------------------------------------
 
     if query.data == "add_group":
 
         select_button = KeyboardButton(
             "➕ Select Group",
             request_chat={
-                "request_id": 1,
+                "request_id": 1001,
                 "chat_is_channel": False,
                 "chat_is_forum": False,
-                "bot_is_member": False,
+                "bot_is_member": True,
             }
         )
 
@@ -259,16 +249,16 @@ async def button_handler(
 
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # USEFUL COMMANDS
-    # =====================================================
+    # -----------------------------------------------------
 
     if query.data == "useful_commands":
 
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="📋 /pin 4h",
+                    "📋 /pin 4h",
                     copy_text=CopyTextButton(
                         text="/pin 4h"
                     )
@@ -276,7 +266,7 @@ async def button_handler(
             ],
             [
                 InlineKeyboardButton(
-                    text="📋 /pin 8h",
+                    "📋 /pin 8h",
                     copy_text=CopyTextButton(
                         text="/pin 8h"
                     )
@@ -284,7 +274,7 @@ async def button_handler(
             ],
             [
                 InlineKeyboardButton(
-                    text="📋 /pin 12h",
+                    "📋 /pin 12h",
                     copy_text=CopyTextButton(
                         text="/pin 12h"
                     )
@@ -292,37 +282,37 @@ async def button_handler(
             ],
             [
                 InlineKeyboardButton(
-                    text="📋 /pin 24h",
+                    "📋 /pin 24h",
                     copy_text=CopyTextButton(
                         text="/pin 24h"
                     )
-                ]
+                )
             ],
             [
                 InlineKeyboardButton(
                     "⬅️ Back",
                     callback_data="back_start"
                 )
-            ]
+            ],
         ]
 
         await query.edit_message_text(
             "📋 Useful Commands\n\n"
-            "Use these commands in your group.\n"
-            "Tap any command to copy it and use it in your group.",
+            "Use these commands in your group.\n\n"
+            "Tap any command to copy it.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
         return
 
-    # =====================================================
-    # BACK TO MAIN MENU
-    # =====================================================
+    # -----------------------------------------------------
+    # BACK
+    # -----------------------------------------------------
 
     if query.data == "back_start":
 
         await query.edit_message_text(
-            "✅ Pin Cycle\n\n"
+            "⚡ Pin Cycle\n\n"
             "Select an option below:",
             reply_markup=main_menu()
         )
@@ -340,7 +330,12 @@ async def group_selected(
 ):
 
     user = update.effective_user
-    shared = update.message.chat_shared
+    message = update.effective_message
+
+    if not user or not message:
+        return
+
+    shared = message.chat_shared
 
     if not shared:
         return
@@ -352,50 +347,61 @@ async def group_selected(
 
     try:
 
+        # -------------------------------------------------
+        # GET GROUP
+        # -------------------------------------------------
+
         chat = await context.bot.get_chat(chat_id)
 
-        # Must be group/supergroup
         if chat.type not in (
             ChatType.GROUP,
-            ChatType.SUPERGROUP
+            ChatType.SUPERGROUP,
         ):
 
-            await update.message.reply_text(
+            await message.reply_text(
                 "❌ Please select a group.",
                 reply_markup=ReplyKeyboardRemove()
             )
 
             return
 
-        # Check bot status
+        # -------------------------------------------------
+        # CHECK BOT
+        # -------------------------------------------------
+
+        me = await context.bot.get_me()
+
         bot_member = await context.bot.get_chat_member(
             chat_id,
-            context.bot.id
+            me.id
         )
 
         if bot_member.status != "administrator":
 
-            await update.message.reply_text(
+            await message.reply_text(
                 "❌ Pin Cycle must be an administrator "
                 "in this group.\n\n"
-                "Please add the bot as an admin and give it "
-                "Pin Messages and Delete Messages permission.",
+                "Please make the bot an admin and give it "
+                "the permission to pin messages.",
                 reply_markup=ReplyKeyboardRemove()
             )
 
             return
 
-        # Save group
+        # -------------------------------------------------
+        # SAVE GROUP
+        # -------------------------------------------------
+
         save_group(
-            chat_id,
-            chat.title or "Unnamed Group",
-            user.id
+            chat_id=chat_id,
+            title=chat.title or "Unnamed Group",
+            owner_id=user.id
         )
 
-        await update.message.reply_text(
+        await message.reply_text(
             f"✅ Group added successfully.\n\n"
             f"Group: {chat.title}\n\n"
-            "You can now use:\n"
+            "Now use one of these commands in the group:\n\n"
             "/pin 4h\n"
             "/pin 8h\n"
             "/pin 12h\n"
@@ -405,11 +411,12 @@ async def group_selected(
 
     except Exception as e:
 
-        print("GROUP ERROR:", e)
+        print("GROUP SELECT ERROR:", repr(e))
 
-        await update.message.reply_text(
+        await message.reply_text(
             "❌ Couldn't add this group.\n\n"
-            "Make sure Pin Cycle is added as an administrator.",
+            "Make sure Pin Cycle is added as an administrator "
+            "and has permission to pin messages.",
             reply_markup=ReplyKeyboardRemove()
         )
 
@@ -427,25 +434,46 @@ async def pin_command(
     user = update.effective_user
     chat = update.effective_chat
 
-    # Only group
+    if not message or not user or not chat:
+        return
+
+    # -----------------------------------------------------
+    # GROUP ONLY
+    # -----------------------------------------------------
+
     if chat.type not in (
         ChatType.GROUP,
-        ChatType.SUPERGROUP
+        ChatType.SUPERGROUP,
     ):
         return
 
-    # User must have access
+    # -----------------------------------------------------
+    # ACCESS
+    # -----------------------------------------------------
+
     if not has_access(user.id):
         return
 
-    # Group must be registered
+    # -----------------------------------------------------
+    # GROUP OWNER
+    # -----------------------------------------------------
+
     group_owner = get_group_owner(chat.id)
 
     if group_owner != user.id:
         return
 
-    # Argument required
+    # -----------------------------------------------------
+    # ARGUMENT
+    # -----------------------------------------------------
+
     if not context.args:
+
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
         return
 
     value = context.args[0].lower().strip()
@@ -458,53 +486,66 @@ async def pin_command(
     }
 
     if value not in durations:
+
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
         return
 
-    seconds = durations[value]
+    duration = durations[value]
 
-    # =====================================================
-    # DELETE COMMAND IMMEDIATELY
-    # =====================================================
+    # -----------------------------------------------------
+    # GET GROUP STATE
+    # -----------------------------------------------------
 
-    try:
-        await message.delete()
-    except Exception as e:
-        print("COMMAND DELETE ERROR:", e)
-
-    # =====================================================
-    # CANCEL OLD WAITING CYCLE
-    # =====================================================
-
-    old_task = context.application.chat_data.get(
-        chat.id,
-        {}
-    ).get("pin_task")
-
-    if old_task:
-        old_task.cancel()
-
-    # =====================================================
-    # SAVE CURRENT CYCLE
-    # =====================================================
-
-    context.application.chat_data.setdefault(
+    data = context.application.chat_data.setdefault(
         chat.id,
         {}
     )
 
-    context.application.chat_data[chat.id]["waiting"] = True
-    context.application.chat_data[chat.id]["duration"] = seconds
+    # -----------------------------------------------------
+    # CANCEL OLD TIMER
+    # -----------------------------------------------------
 
-    # =====================================================
-    # ALERT
-    # =====================================================
+    old_task = data.get("pin_task")
+
+    if old_task:
+
+        if not old_task.done():
+            old_task.cancel()
+
+        data.pop("pin_task", None)
+
+    # -----------------------------------------------------
+    # SAVE NEW SETTINGS
+    # -----------------------------------------------------
+
+    data["waiting"] = True
+    data["duration"] = duration
+
+    # -----------------------------------------------------
+    # DELETE COMMAND
+    # -----------------------------------------------------
+
+    try:
+        await message.delete()
+    except Exception as e:
+        print("COMMAND DELETE ERROR:", repr(e))
+
+    # -----------------------------------------------------
+    # STATUS MESSAGE
+    # -----------------------------------------------------
+
+    hours = value.replace("h", "")
 
     await context.bot.send_message(
         chat_id=chat.id,
         text=(
-            f"✅ Pin Cycle is ready. "
-            f"The next post will be pinned for "
-            f"{value[:-1]} hours, except admins."
+            "✅ Pin Cycle is ready.\n\n"
+            f"The next member message will be pinned "
+            f"for {hours} hours, except admins."
         )
     )
 
@@ -524,21 +565,31 @@ async def member_message(
     if not message or not chat:
         return
 
-    # Only groups
+    # -----------------------------------------------------
+    # GROUP ONLY
+    # -----------------------------------------------------
+
     if chat.type not in (
         ChatType.GROUP,
-        ChatType.SUPERGROUP
+        ChatType.SUPERGROUP,
     ):
         return
+
+    # -----------------------------------------------------
+    # GET STATE
+    # -----------------------------------------------------
 
     data = context.application.chat_data.get(chat.id)
 
     if not data:
         return
 
-    # No active /pin command
     if not data.get("waiting"):
         return
+
+    # -----------------------------------------------------
+    # USER
+    # -----------------------------------------------------
 
     user = message.from_user
 
@@ -549,9 +600,9 @@ async def member_message(
     if user.is_bot:
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # CHECK ADMIN
-    # =====================================================
+    # -----------------------------------------------------
 
     try:
 
@@ -562,25 +613,33 @@ async def member_message(
 
         if member.status in (
             "administrator",
-            "creator"
+            "creator",
         ):
             return
 
     except Exception as e:
 
-        print("ADMIN CHECK ERROR:", e)
+        print("ADMIN CHECK ERROR:", repr(e))
         return
+
+    # -----------------------------------------------------
+    # DURATION
+    # -----------------------------------------------------
 
     duration = data.get("duration")
 
     if not duration:
         return
 
-    # =====================================================
-    # THIS IS THE NEXT MEMBER MESSAGE
-    # =====================================================
+    # -----------------------------------------------------
+    # LOCK IMMEDIATELY
+    # -----------------------------------------------------
 
     data["waiting"] = False
+
+    # -----------------------------------------------------
+    # PIN MESSAGE
+    # -----------------------------------------------------
 
     try:
 
@@ -592,22 +651,22 @@ async def member_message(
 
     except Exception as e:
 
-        print("PIN ERROR:", e)
+        print("PIN ERROR:", repr(e))
 
         data["waiting"] = True
 
         return
 
-    # =====================================================
-    # START UNPIN TIMER
-    # =====================================================
+    # -----------------------------------------------------
+    # CREATE UNPIN TASK
+    # -----------------------------------------------------
 
     task = asyncio.create_task(
         unpin_after(
-            context,
-            chat.id,
-            message.message_id,
-            duration
+            context=context,
+            chat_id=chat.id,
+            message_id=message.message_id,
+            duration=duration
         )
     )
 
@@ -619,15 +678,19 @@ async def member_message(
 # =========================================================
 
 async def unpin_after(
-    context,
-    chat_id,
-    message_id,
-    duration
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    message_id: int,
+    duration: int
 ):
 
     try:
 
         await asyncio.sleep(duration)
+
+        # -------------------------------------------------
+        # UNPIN
+        # -------------------------------------------------
 
         try:
 
@@ -638,7 +701,11 @@ async def unpin_after(
 
         except Exception as e:
 
-            print("UNPIN ERROR:", e)
+            print("UNPIN ERROR:", repr(e))
+
+        # -------------------------------------------------
+        # RESET STATE
+        # -------------------------------------------------
 
         data = context.application.chat_data.get(chat_id)
 
@@ -649,11 +716,18 @@ async def unpin_after(
 
     except asyncio.CancelledError:
 
-        pass
+        print(
+            f"PIN TIMER CANCELLED: "
+            f"{chat_id} / {message_id}"
+        )
+
+    except Exception as e:
+
+        print("UNPIN TASK ERROR:", repr(e))
 
 
 # =========================================================
-# OWNER ONLY: /ACCESS
+# OWNER: /ACCESS
 # =========================================================
 
 async def access_command(
@@ -663,8 +737,7 @@ async def access_command(
 
     user = update.effective_user
 
-    # ONLY OWNER
-    if user.id != OWNER_ID:
+    if not user or user.id != OWNER_ID:
         return
 
     if not context.args:
@@ -691,13 +764,13 @@ async def access_command(
     grant_access(user_id)
 
     await update.message.reply_text(
-        f"✅ Access granted successfully.\n\n"
+        "✅ Access granted successfully.\n\n"
         f"User ID: {user_id}"
     )
 
 
 # =========================================================
-# OWNER ONLY: /REMOVE
+# OWNER: /REMOVE
 # =========================================================
 
 async def remove_command(
@@ -707,8 +780,7 @@ async def remove_command(
 
     user = update.effective_user
 
-    # ONLY OWNER
-    if user.id != OWNER_ID:
+    if not user or user.id != OWNER_ID:
         return
 
     if not context.args:
@@ -732,7 +804,6 @@ async def remove_command(
 
         return
 
-    # Owner cannot remove himself
     if user_id == OWNER_ID:
 
         await update.message.reply_text(
@@ -744,7 +815,7 @@ async def remove_command(
     remove_access(user_id)
 
     await update.message.reply_text(
-        f"✅ Access removed successfully.\n\n"
+        "✅ Access removed successfully.\n\n"
         f"User ID: {user_id}"
     )
 
@@ -754,11 +825,14 @@ async def remove_command(
 # =========================================================
 
 async def error_handler(
-    update,
-    context
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE
 ):
 
-    print("BOT ERROR:", context.error)
+    print(
+        "BOT ERROR:",
+        repr(context.error)
+    )
 
 
 # =========================================================
@@ -771,7 +845,7 @@ def main():
 
         raise RuntimeError(
             "BOT_TOKEN is missing. "
-            "Add BOT_TOKEN in Railway Variables."
+            "Please add BOT_TOKEN to your environment variables."
         )
 
     application = (
@@ -780,9 +854,9 @@ def main():
         .build()
     )
 
-    # =====================================================
+    # -----------------------------------------------------
     # COMMANDS
-    # =====================================================
+    # -----------------------------------------------------
 
     application.add_handler(
         CommandHandler("start", start)
@@ -800,53 +874,6 @@ def main():
         CommandHandler("remove", remove_command)
     )
 
-    # =====================================================
-    # INLINE BUTTONS
-    # =====================================================
-
-    application.add_handler(
-        CallbackQueryHandler(button_handler)
-    )
-
-    # =====================================================
-    # GROUP SELECTOR
-    # =====================================================
-
-    application.add_handler(
-        MessageHandler(
-            filters.StatusUpdate.CHAT_SHARED,
-            group_selected
-        )
-    )
-
-    # =====================================================
-    # GROUP MESSAGES
-    # =====================================================
-
-    application.add_handler(
-        MessageHandler(
-            filters.ChatType.GROUPS
-            & ~filters.COMMAND,
-            member_message
-        )
-    )
-
-    # =====================================================
-    # ERROR
-    # =====================================================
-
-    application.add_error_handler(error_handler)
-
-    print("Pin Cycle is running...")
-
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES
-    )
-
-
-# =========================================================
-# RUN
-# =========================================================
-
-if __name__ == "__main__":
-    main()
+    # -----------------------------------------------------
+    # CALLBACK BUTTONS
+    # ---------------------
