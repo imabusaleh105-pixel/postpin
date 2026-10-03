@@ -60,10 +60,11 @@ db.commit()
 
 
 # =========================================================
-# ACCESS
+# ACCESS SYSTEM
 # =========================================================
 
 def has_access(user_id: int) -> bool:
+
     if user_id == OWNER_ID:
         return True
 
@@ -76,6 +77,7 @@ def has_access(user_id: int) -> bool:
 
 
 def grant_access(user_id: int):
+
     db.execute(
         """
         INSERT INTO users(user_id, active)
@@ -85,14 +87,17 @@ def grant_access(user_id: int):
         """,
         (user_id,)
     )
+
     db.commit()
 
 
 def remove_access(user_id: int):
+
     db.execute(
         "UPDATE users SET active = 0 WHERE user_id = ?",
         (user_id,)
     )
+
     db.commit()
 
 
@@ -100,21 +105,33 @@ def remove_access(user_id: int):
 # GROUP DATABASE
 # =========================================================
 
-def save_group(chat_id: int, title: str, owner_id: int):
+def save_group(
+    chat_id: int,
+    title: str,
+    owner_id: int
+):
+
     db.execute(
         """
         INSERT INTO groups(chat_id, title, owner_id)
         VALUES (?, ?, ?)
         ON CONFLICT(chat_id)
-        DO UPDATE SET title = excluded.title,
-                      owner_id = excluded.owner_id
+        DO UPDATE SET
+            title = excluded.title,
+            owner_id = excluded.owner_id
         """,
-        (chat_id, title, owner_id)
+        (
+            chat_id,
+            title,
+            owner_id
+        )
     )
+
     db.commit()
 
 
 def get_group_owner(chat_id: int):
+
     row = db.execute(
         "SELECT owner_id FROM groups WHERE chat_id = ?",
         (chat_id,)
@@ -154,7 +171,7 @@ def main_menu():
 
 
 # =========================================================
-# START
+# /START
 # =========================================================
 
 async def start(
@@ -164,8 +181,12 @@ async def start(
 
     user = update.effective_user
 
-    if not user:
+    if not user or not update.message:
         return
+
+    # -----------------------------------------------------
+    # NO ACCESS
+    # -----------------------------------------------------
 
     if not has_access(user.id):
 
@@ -185,6 +206,10 @@ async def start(
         )
 
         return
+
+    # -----------------------------------------------------
+    # ACCESS GRANTED
+    # -----------------------------------------------------
 
     await update.message.reply_text(
         "⚡ Pin Cycle\n\n"
@@ -211,6 +236,10 @@ async def button_handler(
 
     user_id = query.from_user.id
 
+    # -----------------------------------------------------
+    # ACCESS CHECK
+    # -----------------------------------------------------
+
     if not has_access(user_id):
 
         await query.edit_message_text(
@@ -220,9 +249,9 @@ async def button_handler(
 
         return
 
-    # -----------------------------------------------------
+    # =====================================================
     # ADD GROUP
-    # -----------------------------------------------------
+    # =====================================================
 
     if query.data == "add_group":
 
@@ -249,9 +278,9 @@ async def button_handler(
 
         return
 
-    # -----------------------------------------------------
+    # =====================================================
     # USEFUL COMMANDS
-    # -----------------------------------------------------
+    # =====================================================
 
     if query.data == "useful_commands":
 
@@ -305,9 +334,9 @@ async def button_handler(
 
         return
 
-    # -----------------------------------------------------
+    # =====================================================
     # BACK
-    # -----------------------------------------------------
+    # =====================================================
 
     if query.data == "back_start":
 
@@ -366,7 +395,7 @@ async def group_selected(
             return
 
         # -------------------------------------------------
-        # CHECK BOT
+        # CHECK BOT ADMIN
         # -------------------------------------------------
 
         me = await context.bot.get_me()
@@ -382,7 +411,7 @@ async def group_selected(
                 "❌ Pin Cycle must be an administrator "
                 "in this group.\n\n"
                 "Please make the bot an admin and give it "
-                "the permission to pin messages.",
+                "permission to pin messages.",
                 reply_markup=ReplyKeyboardRemove()
             )
 
@@ -411,12 +440,15 @@ async def group_selected(
 
     except Exception as e:
 
-        print("GROUP SELECT ERROR:", repr(e))
+        print(
+            "GROUP SELECT ERROR:",
+            repr(e)
+        )
 
         await message.reply_text(
             "❌ Couldn't add this group.\n\n"
-            "Make sure Pin Cycle is added as an administrator "
-            "and has permission to pin messages.",
+            "Make sure Pin Cycle is added as an "
+            "administrator and has permission to pin messages.",
             reply_markup=ReplyKeyboardRemove()
         )
 
@@ -497,7 +529,7 @@ async def pin_command(
     duration = durations[value]
 
     # -----------------------------------------------------
-    # GET GROUP STATE
+    # GROUP STATE
     # -----------------------------------------------------
 
     data = context.application.chat_data.setdefault(
@@ -519,23 +551,26 @@ async def pin_command(
         data.pop("pin_task", None)
 
     # -----------------------------------------------------
-    # SAVE NEW SETTINGS
+    # SAVE SETTINGS
     # -----------------------------------------------------
 
     data["waiting"] = True
     data["duration"] = duration
 
     # -----------------------------------------------------
-    # DELETE COMMAND
+    # DELETE /PIN COMMAND
     # -----------------------------------------------------
 
     try:
         await message.delete()
     except Exception as e:
-        print("COMMAND DELETE ERROR:", repr(e))
+        print(
+            "COMMAND DELETE ERROR:",
+            repr(e)
+        )
 
     # -----------------------------------------------------
-    # STATUS MESSAGE
+    # STATUS
     # -----------------------------------------------------
 
     hours = value.replace("h", "")
@@ -579,7 +614,9 @@ async def member_message(
     # GET STATE
     # -----------------------------------------------------
 
-    data = context.application.chat_data.get(chat.id)
+    data = context.application.chat_data.get(
+        chat.id
+    )
 
     if not data:
         return
@@ -596,7 +633,10 @@ async def member_message(
     if not user:
         return
 
-    # Ignore bots
+    # -----------------------------------------------------
+    # IGNORE BOTS
+    # -----------------------------------------------------
+
     if user.is_bot:
         return
 
@@ -619,7 +659,11 @@ async def member_message(
 
     except Exception as e:
 
-        print("ADMIN CHECK ERROR:", repr(e))
+        print(
+            "ADMIN CHECK ERROR:",
+            repr(e)
+        )
+
         return
 
     # -----------------------------------------------------
@@ -632,7 +676,7 @@ async def member_message(
         return
 
     # -----------------------------------------------------
-    # LOCK IMMEDIATELY
+    # LOCK
     # -----------------------------------------------------
 
     data["waiting"] = False
@@ -651,14 +695,17 @@ async def member_message(
 
     except Exception as e:
 
-        print("PIN ERROR:", repr(e))
+        print(
+            "PIN ERROR:",
+            repr(e)
+        )
 
         data["waiting"] = True
 
         return
 
     # -----------------------------------------------------
-    # CREATE UNPIN TASK
+    # CREATE TIMER
     # -----------------------------------------------------
 
     task = asyncio.create_task(
@@ -701,13 +748,18 @@ async def unpin_after(
 
         except Exception as e:
 
-            print("UNPIN ERROR:", repr(e))
+            print(
+                "UNPIN ERROR:",
+                repr(e)
+            )
 
         # -------------------------------------------------
-        # RESET STATE
+        # RESET
         # -------------------------------------------------
 
-        data = context.application.chat_data.get(chat_id)
+        data = context.application.chat_data.get(
+            chat_id
+        )
 
         if data:
 
@@ -723,11 +775,14 @@ async def unpin_after(
 
     except Exception as e:
 
-        print("UNPIN TASK ERROR:", repr(e))
+        print(
+            "UNPIN TASK ERROR:",
+            repr(e)
+        )
 
 
 # =========================================================
-# OWNER: /ACCESS
+# OWNER ONLY: /ACCESS
 # =========================================================
 
 async def access_command(
@@ -751,7 +806,9 @@ async def access_command(
 
     try:
 
-        user_id = int(context.args[0])
+        user_id = int(
+            context.args[0]
+        )
 
     except ValueError:
 
@@ -770,7 +827,7 @@ async def access_command(
 
 
 # =========================================================
-# OWNER: /REMOVE
+# OWNER ONLY: /REMOVE
 # =========================================================
 
 async def remove_command(
@@ -794,7 +851,9 @@ async def remove_command(
 
     try:
 
-        user_id = int(context.args[0])
+        user_id = int(
+            context.args[0]
+        )
 
     except ValueError:
 
@@ -803,6 +862,10 @@ async def remove_command(
         )
 
         return
+
+    # -----------------------------------------------------
+    # OWNER PROTECTION
+    # -----------------------------------------------------
 
     if user_id == OWNER_ID:
 
@@ -826,54 +889,4 @@ async def remove_command(
 
 async def error_handler(
     update: object,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    print(
-        "BOT ERROR:",
-        repr(context.error)
-    )
-
-
-# =========================================================
-# MAIN
-# =========================================================
-
-def main():
-
-    if not BOT_TOKEN:
-
-        raise RuntimeError(
-            "BOT_TOKEN is missing. "
-            "Please add BOT_TOKEN to your environment variables."
-        )
-
-    application = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-
-    # -----------------------------------------------------
-    # COMMANDS
-    # -----------------------------------------------------
-
-    application.add_handler(
-        CommandHandler("start", start)
-    )
-
-    application.add_handler(
-        CommandHandler("pin", pin_command)
-    )
-
-    application.add_handler(
-        CommandHandler("access", access_command)
-    )
-
-    application.add_handler(
-        CommandHandler("remove", remove_command)
-    )
-
-    # -----------------------------------------------------
-    # CALLBACK BUTTONS
-    # ---------------------
+    context: ContextTypes.DEF
